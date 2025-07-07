@@ -32,10 +32,12 @@ INVITE_LINK = ("https://discord.com/oauth2/authorize?client_id="
     "999808708131426434&permissions=0&scope=bot")
 
 def run_snitch_vis(*args):
+    qapp = QApplication(['-platform', 'minimal'])
     vis = SnitchVisRecord(*args)
     vis.render()
 
 def run_image_render(*args):
+    qapp = QApplication(['-platform', 'minimal'])
     vis = SnitchVisImage(*args)
     vis.render()
 
@@ -1515,7 +1517,7 @@ class Snitchvis(Client):
 # draw on qimages and generate videos with SnitchVisRecord and
 # FrameRenderer.
 # https://stackoverflow.com/q/13215120 for platform/minimal args
-qapp = QApplication(['-platform', 'minimal'])
+# qapp = QApplication(['-platform', 'minimal'])
 
 if __name__ == "__main__":
     client = Snitchvis()
