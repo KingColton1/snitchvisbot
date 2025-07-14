@@ -52,6 +52,7 @@ class Snitchvis(Client):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.render_pool = ProcessPoolExecutor(max_workers=2) 
         # there's a potential race condition when indexing messages on startup,
         # where we spend x seconds indexing channels before some channel c,
         # but than at y < x seconds a new message comes in to channel c which
@@ -302,8 +303,7 @@ class Snitchvis(Client):
             config = Config(snitches=snitches, events=events, users=users)
             f = partial(run_image_render, output_file, config)
 
-            with ProcessPoolExecutor() as pool:
-                await self.loop.run_in_executor(pool, f)
+            await self.loop.run_in_executor(self.render_pool, f)
 
             livemap_file = File(output_file)
             await channel.send(file=livemap_file)
@@ -315,10 +315,17 @@ class Snitchvis(Client):
                 log_file = File(output_file)
                 await log_channel.send(file=log_file)
 
+    def batch_add_events(events):
+        for (message_, event) in events:
+            db.add_event(message_, event, commit=False)
+        db.commit()
+
     async def index_channel(self, channel, discord_channel, *, update_message=None):
         print(f"Indexing channel {discord_channel} / {discord_channel.id}, "
             f"guild {discord_channel.guild} / {discord_channel.guild.id}")
         num_events = 0
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.batch_add_events, events)
         events = []
         last_id = channel.last_indexed_id
         kira_configs = db.get_kira_configs(discord_channel.guild.id)
@@ -361,15 +368,15 @@ class Snitchvis(Client):
                         await asyncio.sleep(5)
 
                 # batch commit
-                for (message_, event) in events:
-                    db.add_event(message_, event, commit=False)
-                db.commit()
+                if events:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, self.batch_add_events, events)
                 events = []
 
         # commit any stragglers
-        for (message_, event) in events:
-            db.add_event(message_, event, commit=False)
-        db.commit()
+        if events:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self.batch_add_events, events)
 
         # update last_indexed (if the channel has messages at all)
         last_messages = [m async for m in discord_channel.history(limit=1)]
@@ -379,7 +386,7 @@ class Snitchvis(Client):
 
         return num_events
 
-    def parse_event(self, raw_event, kira_configs):
+    async def parse_event(self, raw_event, kira_configs):
         # we'll try all the available configs in order. If none of them match
         # the event, we'll raise an InvalidEventException.
         # Always try the default kira config first.
@@ -982,8 +989,7 @@ class Snitchvis(Client):
                 str(output_file), config_)
 
             self.concurrent_renders[message.guild.id] += 1
-            with ProcessPoolExecutor() as pool:
-                await self.loop.run_in_executor(pool, f)
+            await self.loop.run_in_executor(self.render_pool, f)
             self.concurrent_renders[message.guild.id] -= 1
 
             vis_file = File(output_file)
